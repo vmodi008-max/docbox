@@ -807,7 +807,8 @@ function normBank(x) {
   x = x && typeof x === "object" ? x : {};
   return { bankName: String(x.bankName || ""), accountLast4: String(x.accountLast4 || "").replace(/\D/g, "").slice(-4), from: String(x.from || ""), to: String(x.to || ""), notes: String(x.notes || ""),
     bankLedger: String(x.bankLedger || ""),
-    transactions: (Array.isArray(x.transactions) ? x.transactions : []).map(t => ({ date: String(t.date || ""), narration: String(t.narration || ""), ref: String(t.ref || ""), debit: r2(t.debit), credit: r2(t.credit), ledger: String(t.ledger || "") })) };
+    transactions: (Array.isArray(x.transactions) ? x.transactions : []).map(t => ({ date: String(t.date || ""), narration: String(t.narration || ""), ref: String(t.ref || ""), debit: r2(t.debit), credit: r2(t.credit),
+      balance: t.balance == null || t.balance === "" ? null : r2(t.balance), ledger: String(t.ledger || "") })) };
 }
 function normOther(x) { x = x && typeof x === "object" ? x : {}; return { kind: String(x.kind || ""), summary: String(x.summary || ""), date: String(x.date || ""), amount: r2(x.amount), notes: String(x.notes || "") }; }
 const norm = (type, x) => type === "bank" ? normBank(x) : type === "other" ? normOther(x) : normBill(x);
@@ -818,17 +819,147 @@ function bankLedgerFor(x, c) {
   return m ? m.ledger : (c.banks[0]?.ledger || "");
 }
 
-const AI_ERR = { nokey: "Add your Anthropic API key in Settings first.", fetch: "The file couldn't be loaded. Check your internet.", invalid_json: "The reply couldn't be understood. Try again.",
+const AI_ERR = { locked: "This PDF is password-protected. Ask the client to send the statement without a password, or as Excel from net banking.",
+  badpdf: "This PDF couldn't be opened. Ask the client for a fresh download from net banking, or Excel.",
+  norows: "No transactions were found. Check that this is a bank statement, or try Read again.",
+  empty: "The file has no readable content.",
+  nokey: "Add your Anthropic API key in Settings first.", fetch: "The file couldn't be loaded. Check your internet.", invalid_json: "The reply couldn't be understood. Try again.",
   401: "The Anthropic API key is wrong. Check it in Settings.", 403: "This API key isn't allowed to do this. Check it in your Anthropic account.",
   429: "Too many requests or your API credit has run out. Wait a minute, or add credit in your Anthropic account.",
   529: "The AI service is busy. Try again in a few minutes.", 404: "The model name in Settings isn't valid.", cancelled: "Stopped." };
 function aiErrText(e) { return AI_ERR[e?.status] || AI_ERR[e?.code] || (e?.message ? "Reading failed: " + e.message : "Reading failed. Try again, or type the figures in."); }
+
+/* ---------- bank statements: read in parts so long statements are never cut off ---------- */
+let pdfLibPromise = null;
+function loadPdfLib() {
+  if (window.PDFLib) return Promise.resolve(window.PDFLib);
+  return pdfLibPromise ||= new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js";
+    s.onload = () => res(window.PDFLib); s.onerror = () => { pdfLibPromise = null; rej(new Error("Couldn't load the PDF reader. Check your internet.")); };
+    document.head.append(s);
+  });
+}
+const PAGES_PER_PART = 3, ROWS_PER_PART = 120;
+async function pdfParts(blob) {
+  const P = await loadPdfLib();
+  let src;
+  try { src = await P.PDFDocument.load(await blob.arrayBuffer()); }
+  catch (e) { if (/encrypt/i.test(e.message || "")) throw { code: "locked" }; throw { code: "badpdf" }; }
+  const n = src.getPageCount(), parts = [];
+  for (let s = 0; s < n; s += PAGES_PER_PART) {
+    const d = await P.PDFDocument.create();
+    const idx = Array.from({ length: Math.min(PAGES_PER_PART, n - s) }, (_, k) => s + k);
+    (await d.copyPages(src, idx)).forEach(p => d.addPage(p));
+    parts.push({ label: `pages ${s + 1}–${s + idx.length} of ${n}`, b64: await blobToB64(new Blob([await d.save()], { type: "application/pdf" })) });
+  }
+  return parts;
+}
+function textParts(text) {
+  const ls = text.split(/\r?\n/);
+  if (ls.length <= ROWS_PER_PART + 15) return [{ label: "", text }];
+  const head = ls.slice(0, 15).join("\n"), parts = [];
+  const label = (a, b) => `rows ${a + 1}–${Math.min(b, ls.length)} of ${ls.length}`;
+  const firstEnd = 15 + ROWS_PER_PART;
+  parts.push({ label: label(0, firstEnd), text: ls.slice(0, firstEnd).join("\n") });
+  for (let s = firstEnd; s < ls.length; s += ROWS_PER_PART)
+    parts.push({ label: label(s, s + ROWS_PER_PART),
+      text: `First lines of the file, for the column headings only (their transactions belong to another part, don't repeat them):\n${head}\n\nThis part:\n${ls.slice(s, s + ROWS_PER_PART).join("\n")}` });
+  return parts;
+}
+function bankPrompt(c, it, partLabel, text) {
+  return `You are helping an Indian chartered accountant post bank entries in Tally. The statement belongs to "${c.name || "the client"}".${it.note ? " Client's note: " + it.note : ""}
+${partLabel ? `This is one part of a longer statement: ${partLabel}. Read ONLY the transactions in this part.` : "Read every transaction in this statement."}
+${text ? `\nStatement contents:\n<<<\n${text}\n>>>\n` : ""}
+Reply with only JSON in this compact shape (rows are arrays to keep the reply short):
+{"bankName":"","accountLast4":"","from":"YYYY-MM-DD","to":"YYYY-MM-DD","rows":[["YYYY-MM-DD","narration","ref",withdrawal,deposit,balance]],"notes":""}
+Rules:
+- One row per transaction, in the statement's order. Skip opening balance, closing balance, totals and heading rows.
+- withdrawal = money going out (debit, Dr, minus sign); deposit = money coming in (credit, Cr, plus sign). Put 0 in the other one. Both are positive numbers in rupees, no commas.
+- balance = the running balance printed on that row, as a number; negative if the statement shows it as negative, Dr or overdrawn. Use null if no balance is printed.
+- Use the transaction date (not the value date). Keep narration short (max 60 characters) but keep party names, UPI/NEFT/RTGS/IMPS and cheque numbers.
+- accountLast4 = last 4 digits of the account number only, if shown in this part.
+- In notes mention anything doubtful: unreadable rows, a page that looks cut off.`;
+}
+function salvageRows(t) {
+  const out = [];
+  for (const m of String(t || "").matchAll(/\[\s*"\d{4}-\d{2}-\d{2}"[^\[\]]*\]/g)) { try { out.push(JSON.parse(m[0])); } catch {} }
+  return out;
+}
+async function callClaude(content, signal) {
+  const key = lsGet("dbx-akey"); if (!key) throw { code: "nokey" };
+  let r;
+  try {
+    r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", signal,
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify({ model: lsGet("dbx-model") || DEFAULT_MODEL, max_tokens: 16000, messages: [{ role: "user", content }] }) });
+  } catch (e) { if (e?.name === "AbortError") throw { code: "cancelled" }; throw { code: "fetch" }; }
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    const m = j?.error?.message || "";
+    if (/password|encrypt/i.test(m)) throw { code: "locked" };
+    throw { status: r.status, message: m };
+  }
+  const j = await r.json();
+  return { text: (j.content || []).filter(b => b.type === "text").map(b => b.text).join(""), cut: j.stop_reason === "max_tokens" };
+}
+async function readBank(it, c, blob, signal, onStage) {
+  let parts;
+  if (it.mime === "application/pdf") { onStage && onStage("Splitting the statement into parts…"); parts = (await pdfParts(blob)).map(p => ({ ...p, kind: "pdf" })); }
+  else {
+    const text = isExcel(it.mime) ? (onStage && onStage("Opening the Excel file…"), await excelToText(blob, 400000)) : (await blob.text()).slice(0, 400000);
+    if (!text.trim()) throw { code: "empty" };
+    parts = textParts(text).map(p => ({ ...p, kind: "text" }));
+  }
+  const res = { bankName: "", accountLast4: "", from: "", to: "", transactions: [], notes: "" };
+  const notes = [];
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    onStage && onStage(parts.length > 1 ? `Reading part ${i + 1} of ${parts.length} (${p.label})… about 20–40 seconds each.` : "Reading the statement… this takes 15–60 seconds.");
+    const content = p.kind === "pdf"
+      ? [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: p.b64 } }, { type: "text", text: bankPrompt(c, it, parts.length > 1 ? p.label : "", "") }]
+      : [{ type: "text", text: bankPrompt(c, it, parts.length > 1 ? p.label : "", p.text) }];
+    const { text, cut } = await callClaude(content, signal);
+    let data = parseJSON(text), rows;
+    if (data && Array.isArray(data.rows)) rows = data.rows;
+    else { rows = salvageRows(text); data = data || {}; if (!rows.length && !cut) throw { code: "invalid_json" }; }
+    if (cut) notes.push(`Part ${i + 1} (${p.label}) was cut short; check its last entries.`);
+    for (const k of ["bankName", "accountLast4", "from"]) if (!res[k] && data[k]) res[k] = String(data[k]);
+    if (data.to) res.to = String(data.to);
+    if (data.notes) notes.push((parts.length > 1 ? `Part ${i + 1}: ` : "") + data.notes);
+    for (const row of rows) {
+      if (!Array.isArray(row)) continue;
+      const [date, narration, ref, wd, dep, bal] = row;
+      res.transactions.push({ date: String(date || ""), narration: String(narration || ""), ref: String(ref || ""), debit: r2(wd), credit: r2(dep), balance: bal == null || bal === "" ? null : r2(bal), ledger: "" });
+    }
+  }
+  res.notes = notes.join(" ");
+  const ext = normBank(res);
+  ext.bankLedger = bankLedgerFor(ext, c);
+  return ext;
+}
+/** Running-balance check: each row's balance should equal the previous balance + deposit − withdrawal. */
+function balanceBreaks(tx) {
+  const out = [];
+  for (let i = 1; i < tx.length; i++) {
+    const a = tx[i - 1], b = tx[i];
+    if (a.balance == null || b.balance == null) continue;
+    if (Math.abs(r2(a.balance + b.credit - b.debit) - b.balance) > 0.5) out.push(i);
+  }
+  return out;
+}
 
 async function readOne(it, c, signal, onStage) {
   const key = lsGet("dbx-akey"); if (!key) throw { code: "nokey" };
   onStage && onStage("Loading the file…");
   const { data: blob, error } = await S.sb.storage.from("docs").download(it.path);
   if (error || !blob) throw { code: "fetch" };
+  if (it.type === "bank") {
+    const ext = await readBank(it, c, blob, signal, onStage);
+    if (!ext.transactions.length) throw { code: "norows" };
+    await updDoc(it.id, { ext, read_at: nowISO(), status: it.status === "new" ? "read" : it.status });
+    return ext;
+  }
   const content = []; let text = "";
   if (it.mime === "application/pdf") content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: await blobToB64(blob) } });
   else if (it.mime === "text/csv") text = (await blob.text()).slice(0, 150000);
@@ -981,12 +1112,15 @@ function bankForm(it, c) {
       h("span", { class: "muted", text: "Withdrawals" }), h("span", { class: "num", text: inr(dr) }), h("span", { class: "muted", text: "Deposits" }), h("span", { class: "num", text: inr(cr) }),
       un ? h("span", { class: "pill read", text: un + " go to " + S.settings.suspense }) : h("span", { class: "pill exported", text: "All mapped" }));
   }
+  const breaks = new Set(balanceBreaks(x.transactions));
+  const hasBal = x.transactions.some(t => t.balance != null);
   function draw() {
-    tbody.replaceChildren(...x.transactions.map((t, i) => h("tr", {},
+    tbody.replaceChildren(...x.transactions.map((t, i) => h("tr", { style: breaks.has(i) ? "background:var(--warn-soft)" : null, title: breaks.has(i) ? "Balance doesn't follow from the previous row" : null },
       h("td", { class: "num small", style: "white-space:nowrap", text: t.date }),
       h("td", { class: "small", style: "min-width:200px", text: t.narration + (t.ref ? " · " + t.ref : "") }),
       h("td", { class: "r num small", text: t.debit ? inr(t.debit) : "" }),
       h("td", { class: "r num small", text: t.credit ? inr(t.credit) : "" }),
+      hasBal ? h("td", { class: "r num small muted", text: t.balance == null ? "" : inr(t.balance) }) : null,
       h("td", {}, h("input", { id: `bk-l-${i}`, class: "cell", style: "min-width:150px", list: "bank-ledger-options", value: t.ledger, placeholder: S.settings.suspense, oninput: e => { t.ledger = e.target.value; sums(); } })))));
     sums();
   }
@@ -1008,8 +1142,11 @@ function bankForm(it, c) {
         draw(); toast(n + " entries mapped"); } }, "Apply"))),
     sumBox,
     x.transactions.length ? h("div", { class: "tablewrap", style: "max-height:55vh;overflow:auto" }, h("table", {},
-      h("thead", {}, h("tr", {}, ["Date", "Narration", "Withdrawal", "Deposit", "Ledger"].map((t, i) => h("th", { class: i === 2 || i === 3 ? "r" : "", text: t })))), tbody))
+      h("thead", {}, h("tr", {}, ["Date", "Narration", "Withdrawal", "Deposit", ...(hasBal ? ["Balance"] : []), "Ledger"].map(t => h("th", { class: ["Withdrawal", "Deposit", "Balance"].includes(t) ? "r" : "", text: t })))), tbody))
       : h("p", { class: "muted", text: "No entries yet. Choose Read with AI to pull them from the statement." }),
+    x.transactions.length && hasBal ? (breaks.size
+      ? h("div", { class: "notice warn", text: `Balance check: ${breaks.size} row${breaks.size > 1 ? "s" : ""} (highlighted) don't follow from the previous balance. An entry may be missing or misread there; compare with the statement.` })
+      : h("div", { class: "notice ok", text: `Balance check passed: every row's balance follows from the one before.` })) : null,
     x.notes ? h("div", { class: "notice info", text: "AI note: " + x.notes }) : null,
     h("div", { class: "row" },
       h("button", { class: "btn", type: "button", onclick: () => saveExt(it, x, false) }, "Save"),
