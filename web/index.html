@@ -72,7 +72,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .drop{border:2px dashed var(--line);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:10px;background:var(--sunk)}
 .drop.over{border-color:var(--accent)}
 .prog{display:flex;flex-direction:column;gap:6px}
-.li{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:12px 2px;border-top:1px solid var(--line);align-items:center}
+.li{display:grid;gap:2px 12px;padding:12px 2px;border-top:1px solid var(--line);align-items:center}
 .li:first-child{border-top:0}
 .li .t{font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .li .s{grid-column:1;font-size:.82rem;color:var(--muted)}
@@ -114,11 +114,40 @@ details summary{cursor:pointer;font-weight:600}
 .tabs{display:flex;gap:4px;background:var(--sunk);padding:4px;border-radius:10px}
 .tabs button{flex:1;border:0;background:transparent;border-radius:7px;padding:9px;cursor:pointer;font-weight:600;color:var(--muted)}
 .tabs button[aria-selected="true"]{background:var(--surface);color:var(--ink)}
+.brand{align-items:center}
+.logo{display:inline-flex;flex:none}
+.ico{display:inline-flex;width:20px;height:20px;flex:none}
+.ico svg{width:100%;height:100%}
+.hero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:center;background:linear-gradient(135deg,var(--accent-soft),var(--surface));border:1px solid var(--line);border-radius:14px;padding:18px 20px;overflow:hidden}
+.hero .art{width:150px;max-width:38vw}
+.hero .art svg{width:100%;height:auto;display:block}
+.hero h1{font-size:1.5rem}
+.art-lg{max-width:260px;margin:0 auto;width:100%}
+.art-lg svg{width:100%;height:auto;display:block}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px}
+.tile{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:12px 8px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;font-size:.84rem;font-weight:600;text-align:center;color:var(--ink);min-height:84px}
+.tile .ico{width:30px;height:30px;color:var(--accent)}
+.tile[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.tile[aria-pressed="true"] .ico{color:var(--accent-ink)}
+.thumb{width:44px;height:44px;border-radius:8px;object-fit:cover;background:var(--sunk);flex:none;display:flex;align-items:center;justify-content:center;color:var(--muted);border:1px solid var(--line)}
+.thumb .ico{width:22px;height:22px}
+.li{grid-template-columns:auto 1fr auto}
+.li .thumb{grid-row:1/3}
+.li .t,.li .s{grid-column:2}
+.li .r{grid-column:3}
+.avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-family:var(--f-display);color:#fff;flex:none;font-size:.95rem}
+.cbtn{grid-template-columns:auto 1fr auto;align-items:center}
+.cbtn .avatar{grid-row:1/3;width:30px;height:30px;font-size:.8rem}
+.cbtn .nm,.cbtn .gs{grid-column:2}
+.cbtn .dot{grid-column:3}
+.docrow{display:flex;gap:10px;align-items:center;min-width:0}
+.bankrow{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto;gap:8px;align-items:end}
+.danger{border-color:color-mix(in srgb,var(--bad) 40%,var(--line))}
 </style>
 </head>
 <body>
 <header class="top">
-  <div class="brand"><span class="mark">Doc<b>Box</b></span><span class="firm" id="firm"></span></div>
+  <div class="brand"><span class="logo" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6h8l4 4v11H11z" fill="var(--accent-ink)"/><path d="M19 6l4 4h-4z" fill="var(--accent-soft)"/><path d="M14 12h6M14 15h6M14 18h4" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round"/><path d="M7 19h4v3h10v-3h4v7H7z" fill="var(--accent-ink)"/></svg></span><span class="mark">Doc<b>Box</b></span><span class="firm" id="firm"></span></div>
   <span class="role" id="role">Loading</span>
   <button class="btn ghost small" id="signout" type="button" hidden>Sign out</button>
 </header>

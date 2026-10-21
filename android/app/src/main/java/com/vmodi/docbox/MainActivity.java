@@ -77,7 +77,8 @@ public class MainActivity extends Activity {
                 Intent pick = new Intent(Intent.ACTION_GET_CONTENT);
                 pick.addCategory(Intent.CATEGORY_OPENABLE);
                 pick.setType("*/*");
-                pick.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {"image/*", "application/pdf", "text/csv", "text/comma-separated-values"});
+                pick.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {"image/*", "application/pdf", "text/csv", "text/comma-separated-values",
+                    "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
                 pick.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE);
                 try {
                     startActivityForResult(Intent.createChooser(pick, "Choose bills"), REQ_FILES);
