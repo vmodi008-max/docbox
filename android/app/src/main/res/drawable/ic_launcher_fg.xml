@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A bill sheet dropping into a tray: 108dp adaptive-icon canvas, artwork inside the 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M40,28 L62,28 L70,36 L70,62 L40,62 Z" />
+    <path android:fillColor="#C9D4F5"
+        android:pathData="M62,28 L70,36 L62,36 Z" />
+    <path android:fillColor="#1D46C4"
+        android:pathData="M45,42 L64,42 L64,45 L45,45 Z M45,49 L64,49 L64,52 L45,52 Z M45,56 L56,56 L56,59 L45,59 Z" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M32,58 L40,58 L40,66 L70,66 L70,58 L78,58 L78,78 L32,78 Z" />
+</vector>

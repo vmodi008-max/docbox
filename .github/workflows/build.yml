@@ -1,0 +1,68 @@
+# Builds DocBox every time something changes on the main branch:
+# 1) publishes the web app (office + client) on GitHub Pages
+# 2) builds the Android .apk and attaches it to the "Releases" page
+name: Build DocBox
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: docbox-build
+  cancel-in-progress: true
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    outputs:
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+  apk:
+    needs: web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+      - name: Build the APK
+        working-directory: android
+        env:
+          APP_URL: ${{ needs.web.outputs.url }}
+        run: gradle assembleRelease --no-daemon --stacktrace
+      - name: Rename
+        run: cp android/app/build/outputs/apk/release/app-release.apk DocBox.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DocBox-apk
+          path: DocBox.apk
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: DocBox app (build ${{ github.run_number }})
+          body: |
+            Install on Android: download DocBox.apk below on the phone and open it.
+            Web app (office and clients): ${{ needs.web.outputs.url }}
+          files: DocBox.apk
+          make_latest: true

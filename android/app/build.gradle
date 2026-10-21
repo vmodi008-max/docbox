@@ -1,0 +1,43 @@
+plugins {
+    id 'com.android.application'
+}
+
+def appUrl = System.getenv('APP_URL') ?: 'https://example.github.io/docbox/'
+def runNo = (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+
+android {
+    namespace 'com.vmodi.docbox'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.vmodi.docbox'
+        minSdk 26
+        targetSdk 34
+        versionCode runNo
+        versionName "1.0.${runNo}"
+        buildConfigField 'String', 'APP_URL', "\"${appUrl}\""
+    }
+
+    buildFeatures { buildConfig true }
+
+    signingConfigs {
+        release {
+            storeFile file('docbox.keystore')
+            storePassword 'docbox-vma'
+            keyAlias 'docbox'
+            keyPassword 'docbox-vma'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
