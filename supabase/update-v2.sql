@@ -20,7 +20,7 @@ begin
 end $$;
 
 create or replace function public.norm_phone(p text) returns text
-language sql immutable as $$
+language sql immutable set search_path = '' as $$
   select right(regexp_replace(coalesce(p, ''), '\D', '', 'g'), 10)
 $$;
 
